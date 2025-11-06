@@ -87,8 +87,14 @@ loss_fn_jit = jit(loss_fn)
 
 @jit
 def update_weights(W, grads, eta, m):
-    """JIT-compiled weight update"""
-    return [w - (eta / m) * g for w, g in zip(W, grads)]
+    """JIT-compiled weight update - match PyNet-M10 exactly"""
+    W_new = []
+    for i, (w, g) in enumerate(zip(W, grads)):
+        if i == 0:  # First layer - different update rule like PyNet
+            W_new.append(w - eta * g)
+        else:       # Hidden layers - divide by batch size
+            W_new.append(w - (eta / m) * g)
+    return W_new
 
 def backward(X, T, W, h, eta):
     """Backward pass using JAX gradients with JIT compilation"""
@@ -97,7 +103,7 @@ def backward(X, T, W, h, eta):
     # Compute gradients using JIT-compiled function
     grads = grad_fn(W, X, T)
     
-    # Update weights using JIT-compiled function
+    # Update weights using JIT-compiled function - now matches PyNet exactly
     W_new = update_weights(W, grads, eta, m)
     
     # Calculate loss for tracking using JIT-compiled function

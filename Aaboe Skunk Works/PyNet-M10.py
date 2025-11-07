@@ -5,9 +5,6 @@ from keras.datasets import mnist
 from keras.utils import to_categorical
 import time
 
-# ========================================
-# NETWORK CONFIGURATION
-# ========================================
 
 # Dataset Configuration
 num_features = 28 * 28  # MNIST: 28x28 pixels
@@ -20,7 +17,7 @@ activation = 'relu'     # Activation function: 'relu', 'tanh', 'sigmoid'
 weights_init = 'he'     # Weight initialization: 'he', 'xavier', 'normal'
 
 # Training Configuration  
-num_epochs = 10        # Number of training epochs
+num_epochs = 100        # Number of training epochs
 learning_rate = 0.001   # Learning rate for gradient descent
 batch_size = 32         # Mini-batch size
 loss = 'cross_entropy'  # Loss function: 'cross_entropy', 'mse', 'mae'
@@ -91,7 +88,7 @@ class PyNet_M10:
             
             self.W.append(w)
 
-    ### 4. Define Forward Pass
+    
     def forward(self, X, W):
         h = []
         a = X
@@ -105,11 +102,11 @@ class PyNet_M10:
         y = self.softmax(y_hat)  # Output layer always uses softmax for classification
         return y, h
 
-    ### 5. Define Backward Pass
+
     def backward(self, X, T, W, h, eta, y_pred=None):
         
         m = X.shape[1] 
-        
+
         if y_pred is None: # Use pre-computed predictions if available, otherwise compute them
             y, _ = self.forward(X, W)
         else:
@@ -130,6 +127,7 @@ class PyNet_M10:
     
 
     def softmax(self, y_hat):
+        """Compute softmax probabilities"""
         y_hat = y_hat - np.max(y_hat, axis=0, keepdims=True)  # prevent overflow
         exp_scores = np.exp(y_hat)
         return exp_scores / np.sum(exp_scores, axis=0, keepdims=True)
@@ -143,6 +141,18 @@ class PyNet_M10:
             return np.tanh(z)
         elif self.activation == 'sigmoid':
             return 1 / (1 + np.exp(-np.clip(z, -500, 500)))  # Clip to prevent overflow
+        else:
+            raise ValueError(f"Unknown activation: {self.activation}")
+        
+
+    def activation_derivative(self, a):
+        """Calculate derivative of activation function"""
+        if self.activation == 'relu':
+            return a > 0
+        elif self.activation == 'tanh':
+            return 1 - a**2
+        elif self.activation == 'sigmoid':
+            return a * (1 - a)
         else:
             raise ValueError(f"Unknown activation: {self.activation}")
 
@@ -177,18 +187,6 @@ class PyNet_M10:
             return np.sign(y_pred - y_true)
         else:
             raise ValueError(f"Unknown loss function: {self.loss}")
-        
-    
-    def activation_derivative(self, a):
-        """Calculate derivative of activation function"""
-        if self.activation == 'relu':
-            return a > 0
-        elif self.activation == 'tanh':
-            return 1 - a**2
-        elif self.activation == 'sigmoid':
-            return a * (1 - a)
-        else:
-            raise ValueError(f"Unknown activation: {self.activation}")
 
     
 
@@ -199,7 +197,7 @@ net = PyNet_M10(num_features, hidden_units, num_classes, weights_init, activatio
 
 
 
-#%% 6. Training Loop
+#%% 4. Training Loop
 
 def calculate_accuracy(X, T, W):
     """Calculate accuracy percentage"""
@@ -280,7 +278,7 @@ net.W, losses, train_accuracies = train(X_train.T, T_train.T, net.W, num_epochs,
 
 
 
-#%% 7. Evaluate the Model
+#%% 5. Evaluate the Model
 
 def predict(X, W):
     y, _ = net.forward(X, W)

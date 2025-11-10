@@ -125,4 +125,3 @@ net.W, losses, train_accuracies = train(
 y_pred, test_accuracy, test_loss = evaluate_model(
     net, X_test, T_test, y_test, net.W, train_accuracies
 )
-

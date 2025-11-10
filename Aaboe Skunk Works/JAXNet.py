@@ -1,12 +1,5 @@
 #%% JAXNet Shared Functions Module
-"""
-Shared functions for JAXNet neural network implementations.
-Contains all common functionality used by both M10 (MNIST) and E26 (EMNIST) networks.
-JAX version of PyNet.py with identical structure and functionality.
-"""
-
 import time
-import jax
 import jax.numpy as jnp
 from jax import random, grad, jit, vmap
 from functools import partial

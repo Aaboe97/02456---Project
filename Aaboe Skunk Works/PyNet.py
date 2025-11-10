@@ -1,9 +1,4 @@
 #%% PyNet Shared Functions Module
-"""
-Shared functions for PyNet neural network implementations.
-Contains all common functionality used by both M10 (MNIST) and E26 (EMNIST) networks.
-"""
-
 import time
 import numpy as np
 import wandb
@@ -410,7 +405,6 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=F
         wandb.finish(quiet=False)  # Finish the W&B run after logging test metrics (quiet=False shows summary)
     
     return y_pred, test_accuracy, test_loss
-
 
 
 

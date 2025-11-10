@@ -6,7 +6,7 @@ import wandb
 class PyNetBase:
     """Base class containing all shared neural network functionality"""
     
-    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0):
+    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0, dropout_p=None):
         """
         Initialize neural network with configurable architecture.
         
@@ -19,6 +19,7 @@ class PyNetBase:
             loss: Loss function ('cross_entropy', 'mse', 'mae')
             optimizer: Optimizer type ('sgd', 'adam', 'rmsprop')
             l2_coeff: L2 regularization coefficient (weight_decay)
+            dropout_p: List of dropout probabilities for each hidden layer (None = no dropout)
         """
         
         # Build layer sizes: input → hidden layers → output
@@ -30,6 +31,16 @@ class PyNetBase:
         self.loss = loss
         self.optimizer = optimizer
         self.l2_coeff = l2_coeff
+        self.dropout_p = dropout_p
+        
+        # Validate dropout_p if provided
+        num_hidden = len(hidden_units)
+        if dropout_p is not None:
+            if len(dropout_p) != num_hidden:
+                raise ValueError(f"dropout_p must have {num_hidden} values (one per hidden layer)")
+            self.dropout_p = dropout_p
+        else:
+            self.dropout_p = [0.0] * num_hidden  # No dropout by default
         
         # Initialize weights for each layer
         self.W = []
@@ -61,39 +72,59 @@ class PyNetBase:
             self.v = [np.zeros_like(w) for w in self.W]  # Moving average of squared gradients
 
 
-    def forward(self, X, W):
+    def forward(self, X, W, dropout_on=False):
         """
-        Forward pass through the network
+        Forward pass through the network with optional dropout
 
         Args:
             X: Input data
             W: Weights
+            dropout_on: Whether to apply dropout (True during training, False during inference)
         Returns:
             y: Output predictions
             h: List of hidden layer activations
+            masks: List of dropout masks (one per hidden layer)
         """
         h = []
+        masks = []
         a = X
-        for l in range(len(W) - 1):
+        num_hidden = len(W) - 1
+        
+        # Loop through hidden layers
+        for l in range(num_hidden):
             a = np.vstack([a, np.ones(a.shape[1])])  # Add bias term
             z = W[l].T @ a
             a = self._activation_function(z)  # Use configurable activation
+            
+            # Apply dropout if enabled
+            if dropout_on and self.dropout_p[l] > 0.0:
+                p = self.dropout_p[l]
+                # Inverted dropout: scale active neurons to maintain expected activation
+                mask = (np.random.rand(*a.shape) > p).astype(float) / (1.0 - p)
+                a *= mask
+            else:
+                mask = np.ones_like(a)  # No dropout: all neurons active
+            
             h.append(a)
+            masks.append(mask)
+        
+        # Output layer (no dropout)
         a = np.vstack([a, np.ones(a.shape[1])])  # Add bias term
         y_hat = W[-1].T @ a
         y = self._softmax(y_hat)  # Output layer always uses softmax for classification
-        return y, h
+        return y, h, masks
     
 
-    def backward(self, X, T, W, h, eta, y_pred=None, use_clipping=True, max_grad_norm=25.0):
+    def backward(self, X, T, W, h, masks, eta, y_pred=None, use_clipping=True, max_grad_norm=25.0):
         """
-        Backward pass with configurable optimizers, L2 regularization, and gradient clipping.
+        Backward pass with configurable optimizers, L2 regularization, gradient clipping, and dropout.
         
         Args:
             X: Input data
             T: Target labels
             W: Weights
             h: Hidden activations from forward pass
+            masks: Dropout masks from forward pass
             eta: Learning rate
             y_pred: Pre-computed predictions (optional, for efficiency)
             use_clipping: Whether to use gradient clipping (default True)
@@ -102,7 +133,7 @@ class PyNetBase:
         m = X.shape[1]
         
         if y_pred is None:  # Use pre-computed predictions if available, otherwise compute them
-            y, _ = self.forward(X, W)
+            y, _, _ = self.forward(X, W, dropout_on=False)
         else:
             y = y_pred
         
@@ -111,6 +142,8 @@ class PyNetBase:
             self.t += 1
             
         delta = self._loss_derivative(y, T)  # Use configurable loss derivative
+        
+        # Backpropagate through hidden layers (in reverse)
         for l in range(len(W) - 1, 0, -1):
             a_prev = np.vstack([h[l-1], np.ones(h[l-1].shape[1])])  # Add bias term
             Q = a_prev @ delta.T
@@ -123,13 +156,17 @@ class PyNetBase:
             if use_clipping:
                 grad_norm = np.linalg.norm(Q)
                 if grad_norm > max_grad_norm:
-                    Q = Q * (max_grad_norm / grad_norm)
+                    Q *= max_grad_norm / grad_norm
             
             # Apply optimizer update
-            self._apply_optimizer_update(W, l, Q, eta, m)            
+            W = self._apply_optimizer_update(W, l, Q, eta, m)
+            
+            # Backpropagate delta
             delta = W[l][:-1, :] @ delta
             delta *= self._activation_derivative(h[l-1])  # Use configurable activation derivative
+            delta *= masks[l-1]  # Apply dropout mask (only gradients through active neurons)
             
+        # First layer gradient
         a_prev = np.vstack([X, np.ones(X.shape[1])])  # Add bias term
         Q = a_prev @ delta.T
         
@@ -144,7 +181,7 @@ class PyNetBase:
                 Q = Q * (max_grad_norm / grad_norm)
         
         # Apply optimizer update to first layer
-        self._apply_optimizer_update(W, 0, Q, eta, m)
+        W = self._apply_optimizer_update(W, 0, Q, eta, m)
         loss = self._loss_function(y, T)
         return W, loss
     
@@ -185,6 +222,8 @@ class PyNetBase:
         
         else:
             raise ValueError(f"Unknown optimizer: {self.optimizer}")
+        
+        return W
     
 
     def _softmax(self, y_hat):
@@ -254,8 +293,8 @@ class PyNetBase:
 
 # Shared utility functions
 def calculate_accuracy(net, X, T, W):
-    """Calculate accuracy percentage"""
-    y, _ = net.forward(X, W)
+    """Calculate accuracy percentage (always with dropout OFF)"""
+    y, _, _ = net.forward(X, W, dropout_on=False)
     predictions = np.argmax(y, axis=0)
     true_labels = np.argmax(T, axis=0)
     return np.mean(predictions == true_labels) * 100
@@ -304,8 +343,10 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
             batch = order[i:i+batchsize]
             X_batch = X[:, batch]
             T_batch = T[:, batch]
-            y_batch, h = net.forward(X_batch, W)
-            W, loss = net.backward(X_batch, T_batch, W, h, eta, y_batch, use_clipping, max_grad_norm)
+            # Forward pass with dropout enabled during training
+            y_batch, h, masks = net.forward(X_batch, W, dropout_on=True)
+            # Backward pass with dropout masks
+            W, loss = net.backward(X_batch, T_batch, W, h, masks, eta, y_batch, use_clipping, max_grad_norm)
             epoch_loss += loss
 
         # Calculate training accuracy for this epoch
@@ -382,8 +423,8 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=F
         train_accuracies: List of training accuracies from training
         use_wandb: Whether to log test metrics to W&B
     """
-    # Make predictions and calculate accuracy
-    y_test_pred, _ = net.forward(X_test.T, W)
+    # Make predictions and calculate accuracy (dropout OFF for evaluation)
+    y_test_pred, _, _ = net.forward(X_test.T, W, dropout_on=False)
     y_pred = np.argmax(y_test_pred, axis=0)
     test_accuracy = np.mean(y_pred == y_test)
 

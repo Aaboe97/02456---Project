@@ -23,11 +23,12 @@ batch_size = 32            # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
 optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
+dropout_p = [0.1, 0.1]     # Dropout probabilities per layer [hidden1, hidden2, ...]; 0.0 = no dropout
 use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 50.0       # Maximum gradient norm for clipping
 
 # WandB Configuration
-use_wandb = False                           # Enable W&B logging
+use_wandb = True                           # Enable W&B logging
 wandb_project = "02456-project"             # Your W&B project name
 wandb_mode = "offline"                      # W&B mode: "online", "offline", or "disabled"
 wandb_config = {
@@ -45,6 +46,7 @@ wandb_config = {
     "num_epochs": num_epochs,
     "loss": loss,
     "l2_coeff": l2_coeff,
+    "dropout_p": dropout_p,
     "use_grad_clipping": use_grad_clipping,
     "max_grad_norm": max_grad_norm,
 
@@ -99,7 +101,7 @@ class PyNet_E47B(PyNetBase):
     pass
 
 # Initialize network
-net = PyNet_E47B(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+net = PyNet_E47B(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff, dropout_p)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")
@@ -114,6 +116,7 @@ print(f"   Batch size: {batch_size}")
 print(f"   Epochs: {num_epochs}")
 print(f"   Loss function: {loss}")
 print(f"   L2 coefficient: {l2_coeff}")
+print(f"   Dropout probabilities: {dropout_p}")
 print(f"   Gradient clipping: {use_grad_clipping}")
 print(f"   Max gradient norm: {max_grad_norm}")
 

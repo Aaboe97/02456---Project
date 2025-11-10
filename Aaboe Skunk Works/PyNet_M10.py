@@ -3,7 +3,7 @@
 import numpy as np
 from keras.datasets import mnist
 from keras.utils import to_categorical
-from PyNet import PyNetBase, train, evaluate_model
+from PyNet import PyNetBase, train, evaluate_model, plot_training_results
 
 # Dataset Configuration
 num_features = 28 * 28     # MNIST: 28x28 pixels
@@ -127,4 +127,18 @@ net.W, losses, train_accuracies = train(
 # Evaluate and display results
 y_pred, test_accuracy, test_loss = evaluate_model(
     net, X_test, T_test, y_test, net.W, train_accuracies
+)
+
+
+
+
+#%%######################## 6. Plot Training Results #######################
+
+# Plot training curves
+plot_training_results(
+    losses=losses,
+    train_accuracies=train_accuracies,
+    test_accuracy=test_accuracy,
+    figsize=(15, 5),
+    save_path=None  # Set to a path like 'mnist_training.png' to save
 )

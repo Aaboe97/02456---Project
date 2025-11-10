@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import random, grad, jit, vmap
 from functools import partial
+import wandb
 
 class JAXNetBase:
     """Base class containing all shared neural network functionality"""
@@ -301,7 +302,7 @@ def calculate_accuracy(net, X, T, W):
     return jnp.mean(predictions == true_labels) * 100
     
 
-def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_norm=25.0):
+def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_norm=25.0, use_wandb=False, wandb_project=None, wandb_config=None, wandb_mode="online"):
     """
     Training loop for neural network.
     
@@ -314,10 +315,18 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         batchsize: Mini-batch size
         use_clipping: Whether to use gradient clipping
         max_grad_norm: Maximum gradient norm for clipping
+        use_wandb: Whether to use Weights & Biases logging
+        wandb_project: W&B project name
+        wandb_config: Dictionary of hyperparameters to log to W&B
+        wandb_mode: W&B mode - "online", "offline", or "disabled"
     """
     losses = []
     accuracies = []  # Track training accuracy
     epoch_times = []  # Track computation time per epoch
+    
+    # Initialize W&B if enabled
+    if use_wandb and wandb_project:
+        wandb.init(project=wandb_project, config=wandb_config, mode=wandb_mode)
     
     # Print header for nicely formatted table
     print("-" * 70)
@@ -384,6 +393,15 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         
         # Show progress 
         print(f"{epoch_str:<10} {accuracy_str:<10} {gain_str:<10} {time_str:<10} {eta_str}")
+        
+        # Log to W&B if enabled
+        if use_wandb and wandb_project:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": float(epoch_loss),
+                "train_accuracy": float(train_accuracy),
+                "epoch_time": float(epoch_time)
+            })
     
     total_time = time.time() - start_total
     avg_epoch_time = sum(epoch_times) / len(epoch_times)
@@ -392,10 +410,23 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
     print(f"Total training time: {total_time:.1f}sec")
     print(f"Average per epoch: {avg_epoch_time:.2f}sec")
     print("-" * 70)
+    
+    # Don't finish W&B here - let evaluate_model do it after logging test metrics
+    
     return W, losses, accuracies
 
-def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies):
-    """Evaluate model performance and print results"""
+def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=False):
+    """
+    Evaluate model performance and print results
+    
+    Args:
+        net: Neural network instance
+        X_test, T_test: Test data and labels
+        y_test: Test labels (not one-hot encoded)
+        W: Trained weights
+        train_accuracies: List of training accuracies from training
+        use_wandb: Whether to log test metrics to W&B
+    """
     # Make predictions and calculate accuracy
     y_test_pred, _ = net.forward(X_test.T, W)
     y_pred = jnp.argmax(y_test_pred, axis=0)
@@ -409,5 +440,13 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies):
     print(f"Test Loss (avg per sample): {test_loss:.4f}")
     print(f"Training Accuracy Improvement: {(train_accuracies[-1] - train_accuracies[0]):.1f}% points")
     print(f"Final Training Accuracy: {train_accuracies[-1]:.2f}%")
+    
+    # Log test metrics to W&B if enabled and run is still active
+    if use_wandb and wandb.run is not None:
+        wandb.log({
+            "test_accuracy": float(test_accuracy * 100),
+            "test_loss": float(test_loss)
+        })
+        wandb.finish(quiet=False)  # Finish the W&B run after logging test metrics (quiet=False shows summary)
     
     return y_pred, test_accuracy, test_loss

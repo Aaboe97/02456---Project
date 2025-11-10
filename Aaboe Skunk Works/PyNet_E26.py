@@ -26,8 +26,32 @@ l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
 use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 50.0       # Maximum gradient norm for clipping
 
+# WandB Configuration
+use_wandb = False                           # Enable W&B logging
+wandb_project = "02456-project"             # Your W&B project name
+wandb_mode = "offline"                     # W&B mode: "online", "offline", or "disabled"
+wandb_config = {
+    # Architecture
+    "num_features": num_features,
+    "hidden_units": hidden_units,
+    "num_classes": num_classes,
+    "activation": activation,
+    "weights_init": weights_init,
 
+    # Training
+    "optimizer": optimizer,
+    "learning_rate": learning_rate,
+    "batch_size": batch_size,
+    "num_epochs": num_epochs,
+    "loss": loss,
+    "l2_coeff": l2_coeff,
+    "use_grad_clipping": use_grad_clipping,
+    "max_grad_norm": max_grad_norm,
 
+    # Metadata
+    "dataset": "EMNIST",
+    "framework": "PyNet"
+}
 
 #%%######################## 2. Load EMNIST Data ############################
 
@@ -103,9 +127,13 @@ print(f"   Max gradient norm: {max_grad_norm}")
 
 # Train the model (using configured gradient clipping)
 net.W, losses, train_accuracies = train(
-    net, X_train.T, T_train.T, net.W, 
+    net, X_train.T, T_train.T, net.W,
     num_epochs, learning_rate, batch_size,
-    use_clipping=use_grad_clipping, max_grad_norm=max_grad_norm
+    use_clipping=use_grad_clipping, max_grad_norm=max_grad_norm,
+    use_wandb=use_wandb,
+    wandb_project=wandb_project,
+    wandb_config=wandb_config,
+    wandb_mode=wandb_mode
 )
 
 

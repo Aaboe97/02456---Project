@@ -10,7 +10,7 @@ import numpy as np
 class PyNetBase:
     """Base class containing all shared neural network functionality"""
     
-    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy'):
+    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0):
         """
         Initialize neural network with configurable architecture.
         
@@ -21,6 +21,8 @@ class PyNetBase:
             weights_init: Weight initialization method ('he', 'xavier', 'normal')
             activation: Activation function ('relu', 'tanh', 'sigmoid')
             loss: Loss function ('cross_entropy', 'mse', 'mae')
+            optimizer: Optimizer type ('sgd', 'adam', 'rmsprop')
+            l2_coeff: L2 regularization coefficient (weight_decay)
         """
         
         # Build layer sizes: input → hidden layers → output
@@ -30,6 +32,8 @@ class PyNetBase:
         self.activation = activation
         self.weights_init = weights_init
         self.loss = loss
+        self.optimizer = optimizer
+        self.l2_coeff = l2_coeff
         
         # Initialize weights for each layer
         self.W = []
@@ -51,6 +55,14 @@ class PyNetBase:
                 raise ValueError(f"Unknown weights_init: {weights_init}")
             
             self.W.append(w)
+        
+        # Initialize optimizer state
+        if optimizer == 'adam':
+            self.m = [np.zeros_like(w) for w in self.W]  # First moment estimates
+            self.v = [np.zeros_like(w) for w in self.W]  # Second moment estimates
+            self.t = 0  # Time step counter
+        elif optimizer == 'rmsprop':
+            self.v = [np.zeros_like(w) for w in self.W]  # Moving average of squared gradients
 
 
     def forward(self, X, W):
@@ -69,17 +81,17 @@ class PyNetBase:
         for l in range(len(W) - 1):
             a = np.vstack([a, np.ones(a.shape[1])])  # Add bias term
             z = W[l].T @ a
-            a = self.activation_function(z)  # Use configurable activation
+            a = self._activation_function(z)  # Use configurable activation
             h.append(a)
         a = np.vstack([a, np.ones(a.shape[1])])  # Add bias term
         y_hat = W[-1].T @ a
-        y = self.softmax(y_hat)  # Output layer always uses softmax for classification
+        y = self._softmax(y_hat)  # Output layer always uses softmax for classification
         return y, h
     
 
     def backward(self, X, T, W, h, eta, y_pred=None, use_clipping=True, max_grad_norm=25.0):
         """
-        Backward pass with optional gradient clipping and stability checks.
+        Backward pass with configurable optimizers, L2 regularization, and gradient clipping.
         
         Args:
             X: Input data
@@ -97,11 +109,19 @@ class PyNetBase:
             y, _ = self.forward(X, W)
         else:
             y = y_pred
+        
+        # Increment Adam time step once per backward pass
+        if self.optimizer == 'adam':
+            self.t += 1
             
-        delta = self.loss_derivative(y, T)  # Use configurable loss derivative
+        delta = self._loss_derivative(y, T)  # Use configurable loss derivative
         for l in range(len(W) - 1, 0, -1):
             a_prev = np.vstack([h[l-1], np.ones(h[l-1].shape[1])])  # Add bias term
             Q = a_prev @ delta.T
+            
+            # Add L2 regularization to gradient (don't regularize biases - last row)
+            if self.l2_coeff > 0:
+                Q[:-1, :] += self.l2_coeff * W[l][:-1, :]  # Only regularize weights, not biases
             
             # Optional gradient clipping
             if use_clipping:
@@ -109,12 +129,17 @@ class PyNetBase:
                 if grad_norm > max_grad_norm:
                     Q = Q * (max_grad_norm / grad_norm)
             
-            W[l] -= (eta / m) * Q            
+            # Apply optimizer update
+            self._apply_optimizer_update(W, l, Q, eta, m)            
             delta = W[l][:-1, :] @ delta
-            delta *= self.activation_derivative(h[l-1])  # Use configurable activation derivative
+            delta *= self._activation_derivative(h[l-1])  # Use configurable activation derivative
             
         a_prev = np.vstack([X, np.ones(X.shape[1])])  # Add bias term
         Q = a_prev @ delta.T
+        
+        # Add L2 regularization to first layer gradient
+        if self.l2_coeff > 0:
+            Q[:-1, :] += self.l2_coeff * W[0][:-1, :]  # Only regularize weights, not biases
         
         # Optional gradient clipping for first layer
         if use_clipping:
@@ -122,19 +147,58 @@ class PyNetBase:
             if grad_norm > max_grad_norm:
                 Q = Q * (max_grad_norm / grad_norm)
         
-        W[0] -= (eta / m) * Q
-        loss = self.loss_function(y, T)
+        # Apply optimizer update to first layer
+        self._apply_optimizer_update(W, 0, Q, eta, m)
+        loss = self._loss_function(y, T)
         return W, loss
     
+    
+    def _apply_optimizer_update(self, W, layer_idx, gradient, eta, batch_size):
+        """Helper method to apply optimizer-specific weight updates"""
+        
+        if self.optimizer == 'sgd': 
+            # Standard SGD (Stochastic Gradient Descent) update
+            W[layer_idx] -= (eta / batch_size) * gradient
+            
+        elif self.optimizer == 'adam':
+            # Adam (Adaptive Moment Estimation) optimizer update
+            beta1, beta2, epsilon = 0.9, 0.999, 1e-8
+            
+            # Update biased first moment estimate
+            self.m[layer_idx] = beta1 * self.m[layer_idx] + (1 - beta1) * gradient
+            # Update biased second raw moment estimate  
+            self.v[layer_idx] = beta2 * self.v[layer_idx] + (1 - beta2) * gradient**2
+            # Compute bias-corrected first moment estimate
+            m_hat = self.m[layer_idx] / (1 - beta1**self.t)
+            # Compute bias-corrected second raw moment estimate
+            v_hat = self.v[layer_idx] / (1 - beta2**self.t)
+            # Update weights
+            denominator = np.sqrt(v_hat) + epsilon
+            update = (eta / batch_size) * m_hat / denominator
+            # Clip extreme updates to prevent instability
+            update = np.clip(update, -1.0, 1.0)
+            W[layer_idx] -= update
+            
+        elif self.optimizer == 'rmsprop':
+            # RMSprop (Root Mean Square Propagation) optimizer update
+            alpha, epsilon = 0.99, 1e-8
+            # Update moving average of squared gradients
+            self.v[layer_idx] = alpha * self.v[layer_idx] + (1 - alpha) * gradient**2
+            # Update weights
+            W[layer_idx] -= (eta / batch_size) * gradient / (np.sqrt(self.v[layer_idx]) + epsilon)
+        
+        else:
+            raise ValueError(f"Unknown optimizer: {self.optimizer}")
+    
 
-    def softmax(self, y_hat):
+    def _softmax(self, y_hat):
         """Compute softmax probabilities"""
         y_hat = y_hat - np.max(y_hat, axis=0, keepdims=True)  # prevent overflow
         exp_scores = np.exp(y_hat)
         return exp_scores / np.sum(exp_scores, axis=0, keepdims=True)
     
 
-    def activation_function(self, z):
+    def _activation_function(self, z):
         """Apply activation function"""
         if self.activation == 'relu':
             return np.maximum(0, z)
@@ -146,7 +210,7 @@ class PyNetBase:
             raise ValueError(f"Unknown activation: {self.activation}")
         
 
-    def activation_derivative(self, a):
+    def _activation_derivative(self, a):
         """Calculate derivative of activation function"""
         if self.activation == 'relu':
             return a > 0
@@ -158,7 +222,7 @@ class PyNetBase:
             raise ValueError(f"Unknown activation: {self.activation}")
         
 
-    def loss_function(self, y_pred, y_true):
+    def _loss_function(self, y_pred, y_true):
         """Calculate loss based on configured loss function"""
         epsilon = 1e-12  # Prevent log(0)
         
@@ -175,7 +239,7 @@ class PyNetBase:
             raise ValueError(f"Unknown loss function: {self.loss}")
         
 
-    def loss_derivative(self, y_pred, y_true):
+    def _loss_derivative(self, y_pred, y_true):
         """Calculate derivative of loss function for backpropagation"""
         if self.loss == 'cross_entropy':
             # For cross-entropy with softmax: derivative is simply (y_pred - y_true)
@@ -188,6 +252,8 @@ class PyNetBase:
             return np.sign(y_pred - y_true)
         else:
             raise ValueError(f"Unknown loss function: {self.loss}")
+    
+    
 
 
 # Shared utility functions
@@ -296,7 +362,7 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies):
     test_accuracy = np.mean(y_pred == y_test)
 
     # Calculate test loss using the configurable loss function
-    test_loss = net.loss_function(y_test_pred, T_test.T) / X_test.shape[0]  # Average per sample
+    test_loss = net._loss_function(y_test_pred, T_test.T) / X_test.shape[0]  # Average per sample
 
     print(f"\n================== Final Results ==================")
     print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
@@ -305,3 +371,7 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies):
     print(f"Final Training Accuracy: {train_accuracies[-1]:.2f}%")
     
     return y_pred, test_accuracy, test_loss
+
+
+
+

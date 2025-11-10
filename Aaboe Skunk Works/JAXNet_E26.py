@@ -1,15 +1,15 @@
 #%%########### 1. Import Required Libraries and Configuration ############## 
 
 import warnings
-import numpy as np
+import jax.numpy as jnp
 import tensorflow_datasets as tfds
 from keras.utils import to_categorical
-from PyNet import PyNetBase, train, evaluate_model
+from JAXNet import JAXNetBase, train, evaluate_model
 warnings.filterwarnings("ignore", category=RuntimeWarning)  # Suppress runtime warnings for mental stability
 
 # Dataset Configuration
-num_features = 28 * 28     # EMNIST: 28x28 pixels
-num_classes = 26           # EMNIST: letters A-Z
+num_features = 28 * 28  # EMNIST: 28x28 pixels
+num_classes = 26        # EMNIST: letters A-Z
 
 # Architecture Configuration
 hidden_units = [32, 32]    # Units per hidden layer [layer1, layer2, ...]
@@ -19,10 +19,14 @@ weights_init = 'he'        # Weight initialization: 'he', 'xavier', 'normal'
 # Training Configuration  
 num_epochs = 100           # Number of training epochs
 learning_rate = 0.001      # Learning rate for gradient descent
-batch_size = 32            # Mini-batch size
+batch_size = 512           # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
-optimizer = 'sgd'          # Optimizer: 'sgd', 'adam', 'rmsprop'
+
+# Optimizer Configuration
+optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
+
+# Gradient/Update Clipping Configuration  
 use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 50.0       # Maximum gradient norm for clipping
 
@@ -41,7 +45,7 @@ def preprocess_data(ds):
     for image, label in ds:
         images.append(image.numpy())
         labels.append(label.numpy())
-    return np.array(images), np.array(labels)
+    return jnp.array(images), jnp.array(labels)
 
 print("Converting to numpy arrays...")
 X_train, y_train = preprocess_data(ds_train)
@@ -61,6 +65,10 @@ print(f"Adjusted label range: {y_train.min()}-{y_train.max()}")
 T_train = to_categorical(y_train, num_classes=26)
 T_test = to_categorical(y_test, num_classes=26)
 
+# Convert to JAX arrays
+T_train = jnp.array(T_train)
+T_test = jnp.array(T_test)
+
 print(f"Successfully loaded!")
 print(f"Training samples: {X_train.shape[0]:,}")
 print(f"Test samples: {X_test.shape[0]:,}")
@@ -73,12 +81,12 @@ print(f"Image shape: 28x28 → {X_train.shape[1]} features")
 #%%################ 3. Initialize EMNIST Neural Network #####################
 
 # Create EMNIST-specific network class
-class PyNet_E26(PyNetBase):
+class JAXNet_E26(JAXNetBase):
     """EMNIST Letters-specific neural network using shared base functionality"""
     pass
 
 # Initialize network
-net = PyNet_E26(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+net = JAXNet_E26(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")
@@ -101,7 +109,7 @@ print(f"   Max gradient norm: {max_grad_norm}")
 
 #%%########################### 4. Training Loop ############################
 
-# Train the model (using configured gradient clipping)
+# Train the model
 net.W, losses, train_accuracies = train(
     net, X_train.T, T_train.T, net.W, 
     num_epochs, learning_rate, batch_size,
@@ -123,8 +131,8 @@ def number_to_letter(num):
     return chr(ord('A') + num)
 
 print(f"\n Sample Letter Predictions:")
-sample_indices = np.random.choice(len(y_test), 5, replace=False)
+sample_indices = jnp.array([0, 1, 2, 3, 4])  # Use first 5 samples for reproducibility
 for i in sample_indices:
-    true_letter = number_to_letter(y_test[i])  # y_test is already 0-25 range
-    pred_letter = number_to_letter(y_pred[i])
+    true_letter = number_to_letter(int(y_test[i]))  # y_test is already 0-25 range
+    pred_letter = number_to_letter(int(y_pred[i]))
     print(f"True: {true_letter}, Predicted: {pred_letter}")

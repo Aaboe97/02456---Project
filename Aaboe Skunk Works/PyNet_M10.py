@@ -6,8 +6,8 @@ from keras.utils import to_categorical
 from PyNet import PyNetBase, train, evaluate_model
 
 # Dataset Configuration
-num_features = 28 * 28  # MNIST: 28x28 pixels
-num_classes = 10        # MNIST: digits 0-9
+num_features = 28 * 28     # MNIST: 28x28 pixels
+num_classes = 10           # MNIST: digits 0-9
 
 # Architecture Configuration
 hidden_units = [32, 32]    # Units per hidden layer [layer1, layer2, ...]
@@ -19,6 +19,10 @@ num_epochs = 100           # Number of training epochs
 learning_rate = 0.001      # Learning rate for gradient descent
 batch_size = 32            # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
+optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
+l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
+use_grad_clipping = False  # Enable/disable gradient clipping
+max_grad_norm = 1.0        # Maximum gradient norm for clipping
 
 
 
@@ -55,18 +59,34 @@ class PyNet_M10(PyNetBase):
     pass
 
 # Initialize network
-net = PyNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss)
+net = PyNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+
+print(f"\nNetwork Architecture:")
+print(f"   Input features: {num_features}")
+print(f"   Hidden layers: {hidden_units}")
+print(f"   Output classes: {num_classes}")
+print(f"   Activation: {activation}")
+print(f"   Weight init: {weights_init}")
+print(f"Training Configuration:")
+print(f"   Optimizer: {optimizer}")
+print(f"   Learning rate: {learning_rate}")
+print(f"   Batch size: {batch_size}")
+print(f"   Epochs: {num_epochs}")
+print(f"   Loss function: {loss}")
+print(f"   L2 coefficient: {l2_coeff}")
+print(f"   Gradient clipping: {use_grad_clipping}")
+print(f"   Max gradient norm: {max_grad_norm}")
 
 
 
 
 #%%########################### 4. Training Loop ############################
 
-# Train the model (using minimal clipping for MNIST stability)
+# Train the model (using configured gradient clipping)
 net.W, losses, train_accuracies = train(
     net, X_train.T, T_train.T, net.W,
     num_epochs, learning_rate, batch_size,
-    use_clipping=False, max_grad_norm=1.0
+    use_clipping=use_grad_clipping, max_grad_norm=max_grad_norm
 )
 
 #%%########################## 5. Evaluate Model ############################

@@ -9,7 +9,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)  # Suppress runtime w
 
 # Dataset Configuration
 num_features = 28 * 28     # EMNIST: 28x28 pixels
-num_classes = 26           # EMNIST: letters A-Z
+num_classes = 47           # EMNIST Balanced: 47 classes (merged digits and letters)
 
 # Architecture Configuration
 hidden_units = [32, 32]    # Units per hidden layer [layer1, layer2, ...]
@@ -21,19 +21,19 @@ num_epochs = 100           # Number of training epochs
 learning_rate = 0.001      # Learning rate for gradient descent
 batch_size = 32            # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
-optimizer = 'sgd'          # Optimizer: 'sgd', 'adam', 'rmsprop'
+optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
-use_grad_clipping = False  # Enable/disable gradient clipping
-max_grad_norm = 50.0       # Maximum gradient norm for clipping
+use_grad_clipping = False   # Enable/disable gradient clipping
+max_grad_norm = 50.0        # Maximum gradient norm for clipping
 
 
 
 
 #%%######################## 2. Load EMNIST Data ############################
 
-# Load EMNIST Letters dataset using TensorFlow Datasets
-print("Loading EMNIST Letters dataset...")
-ds_train, ds_test = tfds.load('emnist/letters', split=['train', 'test'], as_supervised=True)
+# Load EMNIST Balanced dataset using TensorFlow Datasets
+print("Loading EMNIST Balanced dataset...")
+ds_train, ds_test = tfds.load('emnist/balanced', split=['train', 'test'], as_supervised=True)
 
 # Convert to numpy arrays
 def preprocess_data(ds):
@@ -51,20 +51,17 @@ X_test, y_test = preprocess_data(ds_test)
 X_train = X_train.reshape(-1, 28*28) / 255.0
 X_test = X_test.reshape(-1, 28*28) / 255.0
 
-# EMNIST letters uses labels 1-26, need to convert to 0-25 for one-hot encoding
-print(f"Original label range: {y_train.min()}-{y_train.max()}")
-y_train = y_train - 1  # Convert 1-26 to 0-25
-y_test = y_test - 1    # Convert 1-26 to 0-25
-print(f"Adjusted label range: {y_train.min()}-{y_train.max()}")
+# EMNIST balanced uses labels 0-46 (47 classes)
+print(f"Label range: {y_train.min()}-{y_train.max()}")
 
-# One-hot encode labels (now 0-25 for A-Z)
-T_train = to_categorical(y_train, num_classes=26)
-T_test = to_categorical(y_test, num_classes=26)
+# One-hot encode labels (0-46 for 47 classes)
+T_train = to_categorical(y_train, num_classes=47)
+T_test = to_categorical(y_test, num_classes=47)
 
 print(f"Successfully loaded!")
 print(f"Training samples: {X_train.shape[0]:,}")
 print(f"Test samples: {X_test.shape[0]:,}")
-print(f"Classes: A-Z (26 total)")
+print(f"Classes: 0-9 + merged letters (47 total)")
 print(f"Image shape: 28x28 → {X_train.shape[1]} features")
 
 
@@ -72,13 +69,13 @@ print(f"Image shape: 28x28 → {X_train.shape[1]} features")
 
 #%%################ 3. Initialize EMNIST Neural Network #####################
 
-# Create EMNIST-specific network class
-class PyNet_E26(PyNetBase):
-    """EMNIST Letters-specific neural network using shared base functionality"""
+# Create EMNIST Balanced-specific network class
+class PyNet_E47B(PyNetBase):
+    """EMNIST Balanced-specific neural network using shared base functionality"""
     pass
 
 # Initialize network
-net = PyNet_E26(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+net = PyNet_E47B(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")
@@ -118,13 +115,10 @@ y_pred, test_accuracy, test_loss = evaluate_model(
     net, X_test, T_test, y_test, net.W, train_accuracies
 )
 
-# Convert some predictions to letters for demonstration  
-def number_to_letter(num):
-    return chr(ord('A') + num)
-
-print(f"\n Sample Letter Predictions:")
+print(f"\n Sample Predictions (Class IDs):")
 sample_indices = np.random.choice(len(y_test), 5, replace=False)
 for i in sample_indices:
-    true_letter = number_to_letter(y_test[i])  # y_test is already 0-25 range
-    pred_letter = number_to_letter(y_pred[i])
-    print(f"True: {true_letter}, Predicted: {pred_letter}")
+    true_class = y_test[i]
+    pred_class = y_pred[i]
+    status = "✅" if true_class == pred_class else "❌"
+    print(f"{status} True: {true_class}, Predicted: {pred_class}")

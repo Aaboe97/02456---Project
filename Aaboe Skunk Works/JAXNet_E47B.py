@@ -19,15 +19,16 @@ weights_init = 'he'        # Weight initialization: 'he', 'xavier', 'normal'
 # Training Configuration  
 num_epochs = 100           # Number of training epochs
 learning_rate = 0.001      # Learning rate for gradient descent
-batch_size = 512            # Mini-batch size
+batch_size = 512           # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
 optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
+dropout_p = [0.1, 0.1]     # Dropout probabilities per layer [hidden1, hidden2, ...]; 0.0 = no dropout
 use_grad_clipping = False  # Enable/disable gradient clipping
-max_grad_norm = 50.0       # Maximum gradient norm for clipping
+max_grad_norm = 1.0        # Maximum gradient norm for clipping
 
 # WandB Configuration
-use_wandb = False                           # Enable W&B logging
+use_wandb = True                           # Enable W&B logging
 wandb_project = "02456-project"             # Your W&B project name
 wandb_mode = "offline"                      # W&B mode: "online", "offline", or "disabled"
 wandb_config = {
@@ -45,11 +46,12 @@ wandb_config = {
     "num_epochs": num_epochs,
     "loss": loss,
     "l2_coeff": l2_coeff,
+    "dropout_p": dropout_p,
     "use_grad_clipping": use_grad_clipping,
     "max_grad_norm": max_grad_norm,
     
     # Metadata
-    "dataset": "EMNIST Balanced",
+    "dataset": "EMNIST",
     "framework": "JAXNet"
 }
 
@@ -106,7 +108,7 @@ class JAXNet_E47B(JAXNetBase):
     pass
 
 # Initialize network
-net = JAXNet_E47B(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+net = JAXNet_E47B(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff, dropout_p)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")
@@ -123,6 +125,7 @@ print(f"   Loss function: {loss}")
 print(f"   L2 coefficient: {l2_coeff}")
 print(f"   Gradient clipping: {use_grad_clipping}")
 print(f"   Max gradient norm: {max_grad_norm}")
+print(f"   Dropout: {dropout_p if dropout_p is not None else 'None'}")
 
 
 

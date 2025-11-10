@@ -8,7 +8,7 @@ import wandb
 class JAXNetBase:
     """Base class containing all shared neural network functionality"""
     
-    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0, seed=42):
+    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0, dropout_p=None, seed=42):
         """
         Initialize neural network with configurable architecture.
         
@@ -21,6 +21,7 @@ class JAXNetBase:
             loss: Loss function ('cross_entropy', 'mse', 'mae')
             optimizer: Optimizer type ('sgd', 'adam', 'rmsprop')
             l2_coeff: L2 regularization coefficient (weight_decay)
+            dropout_p: List of dropout probabilities for each hidden layer (None = no dropout)
             seed: Random seed for weight initialization
         """
         
@@ -33,7 +34,17 @@ class JAXNetBase:
         self.loss = loss
         self.optimizer = optimizer
         self.l2_coeff = l2_coeff
+        self.dropout_p = dropout_p
         self.seed = seed
+        
+        # Validate dropout_p if provided
+        num_hidden = len(hidden_units)
+        if dropout_p is not None:
+            if len(dropout_p) != num_hidden:
+                raise ValueError(f"dropout_p must have {num_hidden} values (one per hidden layer)")
+            self.dropout_p = dropout_p
+        else:
+            self.dropout_p = [0.0] * num_hidden  # No dropout by default
         
         # Initialize weights for each layer
         self.W = []
@@ -68,39 +79,63 @@ class JAXNetBase:
             self.v = [jnp.zeros_like(w) for w in self.W]  # Moving average of squared gradients
 
 
-    def forward(self, X, W):
+    def forward(self, X, W, dropout_on=False, rng_key=None):
         """
-        Forward pass through the network
+        Forward pass through the network with optional dropout
 
         Args:
             X: Input data
             W: Weights
+            dropout_on: Whether to apply dropout (True during training, False during inference)
+            rng_key: JAX random key for dropout (required if dropout_on=True)
         Returns:
             y: Output predictions
             h: List of hidden layer activations
+            masks: List of dropout masks (one per hidden layer)
         """
         h = []
+        masks = []
         a = X
-        for l in range(len(W) - 1):
+        num_hidden = len(W) - 1
+        
+        # Loop through hidden layers
+        for l in range(num_hidden):
             a = jnp.vstack([a, jnp.ones((1, a.shape[1]))])  # Add bias term
             z = W[l].T @ a
             a = self._activation_function(z)  # Use configurable activation
+            
+            # Apply dropout if enabled
+            if dropout_on and self.dropout_p[l] > 0.0:
+                if rng_key is None:
+                    raise ValueError("rng_key must be provided when dropout_on=True")
+                rng_key, subkey = random.split(rng_key)
+                p = self.dropout_p[l]
+                # Inverted dropout: scale active neurons to maintain expected activation
+                mask = (random.uniform(subkey, a.shape) > p).astype(float) / (1.0 - p)
+                a = a * mask
+            else:
+                mask = jnp.ones_like(a)  # No dropout: all neurons active
+            
             h.append(a)
+            masks.append(mask)
+        
+        # Output layer (no dropout)
         a = jnp.vstack([a, jnp.ones((1, a.shape[1]))])  # Add bias term
         y_hat = W[-1].T @ a
         y = self._softmax(y_hat)  # Output layer always uses softmax for classification
-        return y, h
+        return y, h, masks
     
 
-    def backward(self, X, T, W, h, eta, y_pred=None, use_clipping=True, max_grad_norm=25.0):
+    def backward(self, X, T, W, h, masks, eta, y_pred=None, use_clipping=True, max_grad_norm=25.0):
         """
-        Backward pass with configurable optimizers, L2 regularization, and gradient clipping.
+        Backward pass with configurable optimizers, L2 regularization, gradient clipping, and dropout.
         
         Args:
             X: Input data
             T: Target labels
             W: Weights
             h: Hidden activations from forward pass
+            masks: Dropout masks from forward pass
             eta: Learning rate
             y_pred: Pre-computed predictions (optional, for efficiency)
             use_clipping: Whether to use gradient clipping (default True)
@@ -109,7 +144,7 @@ class JAXNetBase:
         m = X.shape[1]
         
         if y_pred is None:  # Use pre-computed predictions if available, otherwise compute them
-            y, _ = self.forward(X, W)
+            y, _, _ = self.forward(X, W, dropout_on=False)
         else:
             y = y_pred
         
@@ -118,6 +153,8 @@ class JAXNetBase:
             self.t += 1
             
         delta = self._loss_derivative(y, T)  # Use configurable loss derivative
+        
+        # Backpropagate through hidden layers (in reverse)
         for l in range(len(W) - 1, 0, -1):
             a_prev = jnp.vstack([h[l-1], jnp.ones((1, h[l-1].shape[1]))])  # Add bias term
             Q = a_prev @ delta.T
@@ -133,9 +170,13 @@ class JAXNetBase:
             
             # Apply optimizer update
             W = self._apply_optimizer_update(W, l, Q, eta, m)
+            
+            # Backpropagate delta
             delta = W[l][:-1, :] @ delta
             delta = delta * self._activation_derivative(h[l-1])  # Use configurable activation derivative
+            delta = delta * masks[l-1]  # Apply dropout mask (only gradients through active neurons)
             
+        # First layer gradient
         a_prev = jnp.vstack([X, jnp.ones((1, X.shape[1]))])  # Add bias term
         Q = a_prev @ delta.T
         
@@ -288,8 +329,8 @@ class JAXNetBase:
 
 # Shared utility functions
 def calculate_accuracy(net, X, T, W):
-    """Calculate accuracy percentage"""
-    y, _ = net.forward(X, W)
+    """Calculate accuracy percentage (always with dropout OFF)"""
+    y, _, _ = net.forward(X, W, dropout_on=False)
     predictions = jnp.argmax(y, axis=0)
     true_labels = jnp.argmax(T, axis=0)
     return jnp.mean(predictions == true_labels) * 100
@@ -329,7 +370,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
     start_total = time.time()
 
     m = X.shape[1]
-    key = random.PRNGKey(42)  # For batch shuffling
+    key = random.PRNGKey(42)  # For batch shuffling and dropout
     
     for epoch in range(epochs):
         epoch_start = time.time()  # Start timing this epoch
@@ -342,8 +383,13 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
             batch = order[i:i+batchsize]
             X_batch = X[:, batch]
             T_batch = T[:, batch]
-            y_batch, h = net.forward(X_batch, W)
-            W, loss = net.backward(X_batch, T_batch, W, h, eta, y_batch, use_clipping, max_grad_norm)
+            
+            # Forward pass with dropout enabled during training
+            key, dropout_key = random.split(key)
+            y_batch, h, masks = net.forward(X_batch, W, dropout_on=True, rng_key=dropout_key)
+            
+            # Backward pass with dropout masks
+            W, loss = net.backward(X_batch, T_batch, W, h, masks, eta, y_batch, use_clipping, max_grad_norm)
             epoch_loss += loss
 
         # Calculate training accuracy for this epoch
@@ -420,8 +466,8 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=F
         train_accuracies: List of training accuracies from training
         use_wandb: Whether to log test metrics to W&B
     """
-    # Make predictions and calculate accuracy
-    y_test_pred, _ = net.forward(X_test.T, W)
+    # Make predictions and calculate accuracy (dropout OFF for evaluation)
+    y_test_pred, _, _ = net.forward(X_test.T, W, dropout_on=False)
     y_pred = jnp.argmax(y_test_pred, axis=0)
     test_accuracy = float(jnp.mean(y_pred == y_test))  # Convert to Python float
 

@@ -21,6 +21,7 @@ batch_size = 512           # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
 optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
+dropout_p = [0.1, 0.1]     # Dropout probabilities per layer [hidden1, hidden2, ...]; 0.0 = no dropout
 use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 1.0        # Maximum gradient norm for clipping
 
@@ -43,6 +44,7 @@ wandb_config = {
     "num_epochs": num_epochs,
     "loss": loss,
     "l2_coeff": l2_coeff,
+    "dropout_p": dropout_p,
     "use_grad_clipping": use_grad_clipping,
     "max_grad_norm": max_grad_norm,
     
@@ -93,7 +95,7 @@ class JAXNet_M10(JAXNetBase):
     pass
 
 # Initialize network
-net = JAXNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff)
+net = JAXNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff, dropout_p)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")
@@ -110,6 +112,7 @@ print(f"   Loss function: {loss}")
 print(f"   L2 coefficient: {l2_coeff}")
 print(f"   Gradient clipping: {use_grad_clipping}")
 print(f"   Max gradient norm: {max_grad_norm}")
+print(f"   Dropout: {dropout_p if dropout_p is not None else 'None'}")
 
 
 

@@ -26,7 +26,7 @@ use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 50.0       # Maximum gradient norm for clipping
 
 # WandB Configuration
-use_wandb = True                           # Enable W&B logging
+use_wandb = False                           # Enable W&B logging
 wandb_project = "02456-project"             # Your W&B project name
 wandb_mode = "offline"                      # W&B mode: "online", "offline", or "disabled"
 wandb_config = {

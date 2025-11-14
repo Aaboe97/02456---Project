@@ -449,3 +449,63 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=F
 
 
 
+def plot_training_results(losses, train_accuracies, test_accuracy=None, figsize=(15, 5), save_path=None):
+    """
+    Plot training curves including loss and accuracy over epochs.
+    
+    Args:
+        losses: List of loss values per epoch
+        train_accuracies: List of training accuracy values per epoch
+        test_accuracy: Final test accuracy (optional, shown as horizontal line)
+        figsize: Figure size (width, height)
+        save_path: Optional path to save the figure (e.g., 'training_curves.png')
+    
+    Returns:
+        fig: Matplotlib figure object
+    """
+    import matplotlib.pyplot as plt
+    
+    epochs = range(1, len(losses) + 1)
+    
+    # Create figure with 3 subplots
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    
+    # Plot 1: Training Loss
+    axes[0].plot(epochs, losses, 'b-', linewidth=2, label='Training Loss')
+    axes[0].set_xlabel('Epoch', fontsize=11)
+    axes[0].set_ylabel('Loss', fontsize=11)
+    axes[0].set_title('Training Loss Over Time', fontsize=12, fontweight='bold')
+    axes[0].grid(True, alpha=0.3)
+    axes[0].legend()
+    
+    # Plot 2: Training Accuracy
+    axes[1].plot(epochs, train_accuracies, 'g-', linewidth=2, label='Training Accuracy')
+    if test_accuracy is not None:
+        axes[1].axhline(y=test_accuracy * 100, color='r', linestyle='--', linewidth=2, 
+                       label=f'Test Accuracy: {test_accuracy * 100:.2f}%')
+    axes[1].set_xlabel('Epoch', fontsize=11)
+    axes[1].set_ylabel('Accuracy (%)', fontsize=11)
+    axes[1].set_title('Training Accuracy Over Time', fontsize=12, fontweight='bold')
+    axes[1].grid(True, alpha=0.3)
+    axes[1].legend()
+    
+    # Plot 3: Accuracy Improvement (delta between consecutive epochs)
+    accuracy_deltas = [0] + [train_accuracies[i] - train_accuracies[i-1] 
+                              for i in range(1, len(train_accuracies))]
+    colors = ['g' if d >= 0 else 'r' for d in accuracy_deltas]
+    axes[2].bar(epochs, accuracy_deltas, color=colors, alpha=0.6)
+    axes[2].axhline(y=0, color='black', linestyle='-', linewidth=0.8)
+    axes[2].set_xlabel('Epoch', fontsize=11)
+    axes[2].set_ylabel('Accuracy Change (%)', fontsize=11)
+    axes[2].set_title('Per-Epoch Accuracy Gain/Loss', fontsize=12, fontweight='bold')
+    axes[2].grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: {save_path}")
+    
+    plt.show()
+    
+    return fig

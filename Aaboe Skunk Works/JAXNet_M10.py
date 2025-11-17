@@ -3,7 +3,8 @@
 import jax.numpy as jnp
 from keras.datasets import mnist
 from keras.utils import to_categorical
-from JAXNet import JAXNetBase, train, evaluate_model
+from sklearn.model_selection import train_test_split
+from JAXNet import JAXNetBase, train, evaluate_model, plot_training_results, plot_confusion_matrix
 
 # Dataset Configuration
 num_features = 28 * 28  # MNIST: 28x28 pixels
@@ -28,7 +29,7 @@ max_grad_norm = 1.0        # Maximum gradient norm for clipping
 # WandB Configuration
 use_wandb = True                           # Enable W&B logging
 wandb_project = "02456-project"             # Your W&B project name
-wandb_mode = "offline"                      # W&B mode: "online", "offline", or "disabled"
+wandb_mode = "online"                      # W&B mode: "online", "offline", or "disabled"
 wandb_config = {
     # Architecture
     "num_features": num_features,
@@ -60,26 +61,36 @@ wandb_config = {
 
 # Load MNIST dataset
 print("Loading MNIST dataset...")
-(X_train, y_train), (X_test, y_test) = mnist.load_data()
+(X_train_full, y_train_full), (X_test, y_test) = mnist.load_data()
+
+# Split training into train/validation (90/10)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_train_full, y_train_full, test_size=0.1, random_state=42, stratify=y_train_full
+)
 
 # Reshape and normalize inputs 
 X_train = X_train.reshape(-1, 28*28) / 255.0
+X_val = X_val.reshape(-1, 28*28) / 255.0
 X_test = X_test.reshape(-1, 28*28) / 255.0
 
 # Convert to JAX arrays
 X_train = jnp.array(X_train)
+X_val = jnp.array(X_val)
 X_test = jnp.array(X_test)
 
 # One-hot encode labels
 T_train = to_categorical(y_train, num_classes=10)
+T_val = to_categorical(y_val, num_classes=10)
 T_test = to_categorical(y_test, num_classes=10)
 
 # Convert to JAX arrays
 T_train = jnp.array(T_train)
+T_val = jnp.array(T_val)
 T_test = jnp.array(T_test)
 
 print(f"Successfully loaded!")
 print(f"Training samples: {X_train.shape[0]:,}")
+print(f"Validation samples: {X_val.shape[0]:,}")
 print(f"Test samples: {X_test.shape[0]:,}")
 print(f"Classes: 0-9 (10 total)")
 print(f"Image shape: 28x28 → {X_train.shape[1]} features")
@@ -120,9 +131,10 @@ print(f"   Dropout: {dropout_p if dropout_p is not None else 'None'}")
 #%%########################### 4. Training Loop ############################
 
 # Train the model (using configured gradient clipping)
-net.W, losses, train_accuracies = train(
+net.W, losses, train_accuracies, val_accuracies, val_losses = train(
     net, X_train.T, T_train.T, net.W,
     num_epochs, learning_rate, batch_size,
+    X_val=X_val.T, T_val=T_val.T,
     use_clipping=use_grad_clipping, max_grad_norm=max_grad_norm,
     use_wandb=use_wandb,
     wandb_project=wandb_project,
@@ -134,5 +146,36 @@ net.W, losses, train_accuracies = train(
 
 # Evaluate and display results
 y_pred, test_accuracy, test_loss = evaluate_model(
-    net, X_test, T_test, y_test, net.W, train_accuracies
+    net, X_test, T_test, y_test, net.W, train_accuracies, use_wandb=use_wandb
+)
+
+
+
+
+#%%######################## 6. Plot Training Results #######################
+
+# Plot training curves
+plot_training_results(
+    losses=losses,
+    train_accuracies=train_accuracies,
+    val_accuracies=val_accuracies,
+    val_losses=val_losses,
+    test_accuracy=test_accuracy,
+    figsize=(15, 5),
+    save_path=None  # Set to a path like 'mnist_training.png' to save
+)
+
+
+
+
+#%%###################### 7. Plot Confusion Matrix ########################
+
+# Plot confusion matrix
+plot_confusion_matrix(
+    y_true=y_test,
+    y_pred=y_pred,
+    class_names=[str(i) for i in range(10)],  # MNIST digits 0-9
+    normalize=False,
+    figsize=(8, 6),
+    save_path=None  # Set to a path like 'mnist_confusion.png' to save
 )

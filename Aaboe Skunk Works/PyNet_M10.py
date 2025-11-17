@@ -16,19 +16,19 @@ activation = 'relu'        # Activation function: 'relu', 'tanh', 'sigmoid'
 weights_init = 'he'        # Weight initialization: 'he', 'xavier', 'normal'
 
 # Training Configuration  
-num_epochs = 50           # Number of training epochs
+num_epochs = 100           # Number of training epochs
 learning_rate = 0.001      # Learning rate for gradient descent
 batch_size = 32            # Mini-batch size
 loss = 'cross_entropy'     # Loss function: 'cross_entropy', 'mse', 'mae'
 optimizer = 'adam'         # Optimizer: 'sgd', 'adam', 'rmsprop'
 l2_coeff = 1e-8            # L2 regularization coefficient (weight_decay)
-dropout_p = [0.1, 0.1]     # Dropout probabilities per layer [hidden1, hidden2, ...]; 0.0 = no dropout
+dropout_p = [0.3, 0.3]     # Dropout probabilities per layer [hidden1, hidden2, ...]; 0.0 = no dropout
 use_grad_clipping = False  # Enable/disable gradient clipping
 max_grad_norm = 50.0       # Maximum gradient norm for clipping
 
 # WandB Configuration
 use_wandb = True                           # Enable W&B logging
-wandb_project = "02456-project"             # Your W&B project name
+wandb_project = "PyNet_M10_manual"             # Your W&B project name
 wandb_mode = "online"                      # W&B mode: "online", "offline", or "disabled"
 wandb_config = {
     # Architecture

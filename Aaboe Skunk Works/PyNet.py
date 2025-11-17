@@ -6,7 +6,7 @@ import wandb
 class PyNetBase:
     """Base class containing all shared neural network functionality"""
     
-    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0, dropout_p=None):
+    def __init__(self, num_features, hidden_units, num_output, weights_init='he', activation='relu', loss='cross_entropy', optimizer='sgd', l2_coeff=0.0, dropout_p=None, seed=42):
         """
         Initialize neural network with configurable architecture.
         
@@ -20,7 +20,11 @@ class PyNetBase:
             optimizer: Optimizer type ('sgd', 'adam', 'rmsprop')
             l2_coeff: L2 regularization coefficient (weight_decay)
             dropout_p: List of dropout probabilities for each hidden layer (None = no dropout)
+            seed: Random seed for reproducibility
         """
+        # Set random seed for reproducibility
+        np.random.seed(seed)
+        self.seed = seed
         
         # Build layer sizes: input → hidden layers → output
         layer_sizes = [num_features] + hidden_units + [num_output]

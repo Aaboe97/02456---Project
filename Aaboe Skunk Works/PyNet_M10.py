@@ -96,7 +96,7 @@ class PyNet_M10(PyNetBase):
     pass
 
 # Initialize network
-net = PyNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff, dropout_p)
+net = PyNet_M10(num_features, hidden_units, num_classes, weights_init, activation, loss, optimizer, l2_coeff, dropout_p, seed=42)
 
 print(f"\nNetwork Architecture:")
 print(f"   Input features: {num_features}")

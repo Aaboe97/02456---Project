@@ -345,7 +345,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, X_val=None, T_val=None, use_c
     val_accuracies = []  # Track validation accuracy
     epoch_times = []  # Track computation time per epoch
     
-    # Initialize W&B if enabled
+    # Initialize W&B if enabled and not already initialized (e.g., by sweep agent)
     if use_wandb and wandb_project:
         wandb.init(project=wandb_project, config=wandb_config, mode=wandb_mode)
     
@@ -435,8 +435,8 @@ def train(net, X, T, W, epochs, eta, batchsize=32, X_val=None, T_val=None, use_c
         # Show progress 
         print(f"{epoch_str:<10} {accuracy_str:<12} {val_acc_str:<12} {gain_str:<10} {time_str:<10} {eta_str}")
         
-        # Log to W&B if enabled
-        if use_wandb and wandb_project:
+        # Log to W&B if enabled (works with both direct init and sweep agent)
+        if use_wandb and (wandb_project or wandb.run is not None):
             # Prepare log dictionary
             log_dict = {
                 "epoch": epoch + 1,

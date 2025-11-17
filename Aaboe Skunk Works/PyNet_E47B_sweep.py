@@ -1,22 +1,34 @@
-#%%########### PyNet_M10_Sweep: MNIST Hyperparameter Sweep ##############
+#%%########### PyNet_E47B_Sweep: EMNIST Balanced Hyperparameter Sweep ##############
 """
-MNIST hyperparameter sweep script for WandB.
-Works with PyNet_Sweep_Config.py to automatically test different configurations.
+EMNIST Balanced hyperparameter sweep script for WandB.
+Works with a sweep config to automatically test different configurations.
 
 Usage:
-    1. Run: wandb sweep PyNet_Sweep_Config.py
+    1. Run: wandb sweep <sweep_config>.yaml
     2. Copy the sweep ID
     3. Run: wandb agent <sweep_id>
     
 This script will be called automatically by WandB for each sweep run.
 """
 
+import warnings
 import numpy as np
+import tensorflow_datasets as tfds
 import wandb
-from keras.datasets import mnist
 from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
-from PyNet import PyNetBase, train, evaluate_model, plot_training_results, plot_confusion_matrix
+from PyNet import PyNetBase, train, evaluate_model
+
+warnings.filterwarnings("ignore", category=RuntimeWarning)  # Suppress runtime warnings for mental stability
+
+
+def preprocess_data(ds):
+    """Convert a TFDS dataset split to numpy arrays."""
+    images, labels = [], []
+    for image, label in ds:
+        images.append(image.numpy())
+        labels.append(label.numpy())
+    return np.array(images), np.array(labels)
 
 
 def train_sweep():
@@ -32,35 +44,39 @@ def train_sweep():
     config = wandb.config
     
     print("=" * 70)
-    print(f"Starting sweep run: {run.name}")
+    print(f"Starting EMNIST Balanced sweep run: {run.name}")
     print("=" * 70)
     
     
     #%%######################### 1. Dataset Configuration ####################
     
-    num_features = 28 * 28     # MNIST: 28x28 pixels
-    num_classes = 10           # MNIST: digits 0-9
+    num_features = 28 * 28     # EMNIST: 28x28 pixels
+    num_classes = 47           # EMNIST Balanced: 47 classes (merged digits and letters)
     
     
-    #%%######################### 2. Load MNIST Data ##########################
+    #%%######################### 2. Load EMNIST Data #########################
     
-    print("\nLoading MNIST dataset...")
-    (X_train_full, y_train_full), (X_test, y_test) = mnist.load_data()
+    print("\nLoading EMNIST Balanced dataset...")
+    ds_train, ds_test = tfds.load('emnist/balanced', split=['train', 'test'], as_supervised=True)
+    
+    print("Converting to numpy arrays...")
+    X_train_full, y_train_full = preprocess_data(ds_train)
+    X_test, y_test = preprocess_data(ds_test)
     
     # Split training into train/validation (90/10)
     X_train, X_val, y_train, y_val = train_test_split(
         X_train_full, y_train_full, test_size=0.1, random_state=42, stratify=y_train_full
     )
     
-    # Reshape and normalize inputs
+    # Reshape and normalize inputs (same as MNIST)
     X_train = X_train.reshape(-1, 28*28) / 255.0
     X_val = X_val.reshape(-1, 28*28) / 255.0
     X_test = X_test.reshape(-1, 28*28) / 255.0
     
-    # One-hot encode labels
-    T_train = to_categorical(y_train, num_classes=10)
-    T_val = to_categorical(y_val, num_classes=10)
-    T_test = to_categorical(y_test, num_classes=10)
+    # One-hot encode labels (0-46 for 47 classes)
+    T_train = to_categorical(y_train, num_classes=num_classes)
+    T_val = to_categorical(y_val, num_classes=num_classes)
+    T_test = to_categorical(y_test, num_classes=num_classes)
     
     print(f"Training: {X_train.shape[0]:,} | Validation: {X_val.shape[0]:,} | Test: {X_test.shape[0]:,}")
     
@@ -103,13 +119,13 @@ def train_sweep():
     
     #%%################### 5. Initialize Neural Network ######################
     
-    # Create MNIST-specific network class
-    class PyNet_M10(PyNetBase):
-        """MNIST-specific neural network using shared base functionality"""
+    # Create EMNIST Balanced-specific network class
+    class PyNet_E47B(PyNetBase):
+        """EMNIST Balanced-specific neural network using shared base functionality"""
         pass
     
     # Initialize network
-    net = PyNet_M10(
+    net = PyNet_E47B(
         num_features, hidden_units, num_classes,
         weights_init, activation, loss, optimizer, l2_coeff, dropout_p,
         seed=getattr(config, 'seed', 42)  # Use config.seed if present, else default to 42
@@ -132,9 +148,7 @@ def train_sweep():
         wandb_mode="online"  # Sweeps must be online
     )
     
-
-
-
+    
     #%%########################## 7. Evaluate Model ##########################
     
     # Evaluate and display results

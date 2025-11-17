@@ -11,7 +11,7 @@ num_features = 28 * 28     # MNIST: 28x28 pixels
 num_classes = 10           # MNIST: digits 0-9
 
 # Architecture Configuration
-hidden_units = [32, 32]    # Units per hidden layer [layer1, layer2, ...]
+hidden_units = [128, 128]    # Units per hidden layer [layer1, layer2, ...]
 activation = 'relu'        # Activation function: 'relu', 'tanh', 'sigmoid'
 weights_init = 'he'        # Weight initialization: 'he', 'xavier', 'normal'
 

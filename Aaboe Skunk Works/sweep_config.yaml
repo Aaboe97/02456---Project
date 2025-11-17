@@ -7,15 +7,13 @@ parameters:
   # Architecture parameters
   hidden_units:
     values:
-      - [64, 64]
       - [128, 128]
-    
   
   activation:
-    values: ['relu']
+    values: ['relu', 'tanh','sigmoid']
   
   weights_init:
-    values: ['he']
+    values: ['he','xavier','normal']
   
   # Optimizer parameters
   optimizer:
@@ -26,7 +24,7 @@ parameters:
   
   # Regularization parameters
   dropout_p_value:
-    values: [0.0, 0.2]
+    values: [0.3]
   
   l2_coeff:
     values: [1e-8]
@@ -37,7 +35,7 @@ parameters:
   
   # Fixed parameters
   num_epochs:
-    value: 20
+    value: 100
   
   loss:
     value: 'cross_entropy'

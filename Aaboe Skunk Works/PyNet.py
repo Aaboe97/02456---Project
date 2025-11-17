@@ -129,8 +129,14 @@ class PyNetBase:
             y_pred: Pre-computed predictions (optional, for efficiency)
             use_clipping: Whether to use gradient clipping (default True)
             max_grad_norm: Maximum gradient norm for clipping (default 25.0)
+        
+        Returns:
+            W: Updated weights
+            loss: Loss value
+            grad_norms: List of gradient norms per layer
         """
         m = X.shape[1]
+        grad_norms = []  # Track gradient norms per layer
         
         if y_pred is None:  # Use pre-computed predictions if available, otherwise compute them
             y, _, _ = self.forward(X, W, dropout_on=False)
@@ -152,9 +158,12 @@ class PyNetBase:
             if self.l2_coeff > 0:
                 Q[:-1, :] += self.l2_coeff * W[l][:-1, :]  # Only regularize weights, not biases
             
+            # Calculate gradient norm before clipping
+            grad_norm = np.linalg.norm(Q)
+            grad_norms.append(grad_norm)
+            
             # Optional gradient clipping
             if use_clipping:
-                grad_norm = np.linalg.norm(Q)
                 if grad_norm > max_grad_norm:
                     Q *= max_grad_norm / grad_norm
             
@@ -174,16 +183,23 @@ class PyNetBase:
         if self.l2_coeff > 0:
             Q[:-1, :] += self.l2_coeff * W[0][:-1, :]  # Only regularize weights, not biases
         
+        # Calculate gradient norm for first layer before clipping
+        grad_norm = np.linalg.norm(Q)
+        grad_norms.append(grad_norm)
+        
         # Optional gradient clipping for first layer
         if use_clipping:
-            grad_norm = np.linalg.norm(Q)
             if grad_norm > max_grad_norm:
                 Q = Q * (max_grad_norm / grad_norm)
         
         # Apply optimizer update to first layer
         W = self._apply_optimizer_update(W, 0, Q, eta, m)
         loss = self._loss_function(y, T)
-        return W, loss
+        
+        # Reverse grad_norms to match layer order (0 to N)
+        grad_norms.reverse()
+        
+        return W, loss, grad_norms
     
     
     def _apply_optimizer_update(self, W, layer_idx, gradient, eta, batch_size):
@@ -300,9 +316,9 @@ def calculate_accuracy(net, X, T, W):
     return np.mean(predictions == true_labels) * 100
     
 
-def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_norm=25.0, use_wandb=False, wandb_project=None, wandb_config=None, wandb_mode="online"):
+def train(net, X, T, W, epochs, eta, batchsize=32, X_val=None, T_val=None, use_clipping=True, max_grad_norm=25.0, use_wandb=False, wandb_project=None, wandb_config=None, wandb_mode="online"):
     """
-    Training loop for neural network.
+    Training loop for neural network with mandatory validation.
     
     Args:
         net: Neural network instance
@@ -311,6 +327,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         epochs: Number of training epochs
         eta: Learning rate
         batchsize: Mini-batch size
+        X_val, T_val: Validation data and labels (required)
         use_clipping: Whether to use gradient clipping
         max_grad_norm: Maximum gradient norm for clipping
         use_wandb: Whether to use Weights & Biases logging
@@ -319,7 +336,9 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         wandb_mode: W&B mode - "online", "offline", or "disabled"
     """
     losses = []
-    accuracies = []  # Track training accuracy
+    val_losses = []  # Track validation loss
+    train_accuracies = []  # Track training accuracy
+    val_accuracies = []  # Track validation accuracy
     epoch_times = []  # Track computation time per epoch
     
     # Initialize W&B if enabled
@@ -327,36 +346,57 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         wandb.init(project=wandb_project, config=wandb_config, mode=wandb_mode)
     
     # Print header for nicely formatted table
-    print("-" * 70)
-    print(f"{'Epoch':<10} {'Accuracy':<10} {'Gain':<10} {'Time':<10} {'ETA'}")
-    print("-" * 70)
+    print("-" * 90)
+    print(f"{'Epoch':<10} {'Train Acc':<12} {'Val Acc':<12} {'Gain':<10} {'Time':<10} {'ETA'}")
+    print("-" * 90)
     
     start_total = time.time()
 
-    m = X.shape[1]
+    m = X.shape[1]  # Training set size
+    m_val = X_val.shape[1]  # Validation set size
+    
     for epoch in range(epochs):
         epoch_start = time.time()  # Start timing this epoch
         
+        # Track gradient norms for this epoch
+        epoch_grad_norms = []
+        
         order = np.random.permutation(m)
-        epoch_loss = 0
         for i in range(0, m, batchsize):
             batch = order[i:i+batchsize]
             X_batch = X[:, batch]
             T_batch = T[:, batch]
             # Forward pass with dropout enabled during training
             y_batch, h, masks = net.forward(X_batch, W, dropout_on=True)
-            # Backward pass with dropout masks
-            W, loss = net.backward(X_batch, T_batch, W, h, masks, eta, y_batch, use_clipping, max_grad_norm)
-            epoch_loss += loss
+            # Backward pass with dropout masks (this updates weights with dropout active)
+            W, loss, grad_norms = net.backward(X_batch, T_batch, W, h, masks, eta, y_batch, use_clipping, max_grad_norm)
+            epoch_grad_norms.append(grad_norms)
 
-        # Calculate training accuracy for this epoch
+        # Calculate training accuracy and loss (with dropout OFF for fair comparison)
         train_accuracy = calculate_accuracy(net, X, T, W)
-        accuracies.append(train_accuracy)
-        losses.append(epoch_loss)
+        train_accuracies.append(train_accuracy)
+        # Calculate training loss with dropout OFF
+        y_train_pred, _, _ = net.forward(X, W, dropout_on=False)
+        train_loss = net._loss_function(y_train_pred, T)
+        # Normalize training loss by dataset size (average loss per sample)
+        losses.append(train_loss / m)
+        
+        # Calculate validation accuracy and loss
+        val_accuracy = calculate_accuracy(net, X_val, T_val, W)
+        val_accuracies.append(val_accuracy)
+        # Calculate validation loss
+        y_val_pred, _, _ = net.forward(X_val, W, dropout_on=False)
+        val_loss = net._loss_function(y_val_pred, T_val)
+        # Normalize validation loss by dataset size (average loss per sample)
+        val_losses.append(val_loss / m_val)
+        
+        # Calculate average gradient norms across all batches in this epoch
+        avg_grad_norms = np.mean(epoch_grad_norms, axis=0)  # Average over batches
+        total_grad_norm = np.linalg.norm(avg_grad_norms)  # Total gradient norm
         
         # Calculate gain compared to last epoch
         if epoch > 0:
-            gain = train_accuracy - accuracies[-2]  # Current - previous
+            gain = train_accuracy - train_accuracies[-2]  # Current - previous
             if gain > 0:
                 gain_str = f"+{gain:.2f}%"
             elif gain < 0:
@@ -385,19 +425,40 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
         # Format epoch info for output
         epoch_str = f"{epoch+1}/{epochs}"
         accuracy_str = f"{train_accuracy:.2f}%"
+        val_acc_str = f"{val_accuracy:.2f}%"
         time_str = f"{epoch_time:.2f}sec"
         
         # Show progress 
-        print(f"{epoch_str:<10} {accuracy_str:<10} {gain_str:<10} {time_str:<10} {eta_str}")
+        print(f"{epoch_str:<10} {accuracy_str:<12} {val_acc_str:<12} {gain_str:<10} {time_str:<10} {eta_str}")
         
         # Log to W&B if enabled
         if use_wandb and wandb_project:
-            wandb.log({
+            # Prepare log dictionary
+            log_dict = {
                 "epoch": epoch + 1,
-                "train_loss": float(epoch_loss),
+                "train_loss": float(losses[-1]),  # Use normalized loss
                 "train_accuracy": float(train_accuracy),
-                "epoch_time": float(epoch_time)
-            })
+                "val_accuracy": float(val_accuracy),
+                "val_loss": float(val_losses[-1]),  # Use normalized loss
+                "epoch_time": float(epoch_time),
+                "grad_norm_total": float(total_grad_norm)  # Total gradient norm
+            }
+            
+            # Log per-layer gradient norms
+            for layer_idx, grad_norm in enumerate(avg_grad_norms):
+                log_dict[f"grad_norm_layer_{layer_idx}"] = float(grad_norm)
+            
+            # Log parameter histograms every 1/10th of total epochs
+            histogram_interval = max(1, epochs // 10)
+            if (epoch + 1) % histogram_interval == 0 or epoch == 0:
+                for layer_idx, w in enumerate(W):
+                    # Separate weights and biases (bias is the last row)
+                    weights = w[:-1, :]  # All rows except last
+                    biases = w[-1, :]    # Last row
+                    log_dict[f"weights_layer_{layer_idx}"] = wandb.Histogram(weights.flatten())
+                    log_dict[f"biases_layer_{layer_idx}"] = wandb.Histogram(biases.flatten())
+            
+            wandb.log(log_dict)
     
     total_time = time.time() - start_total
     avg_epoch_time = np.mean(epoch_times)
@@ -409,7 +470,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, use_clipping=True, max_grad_n
     
     # Don't finish W&B here - let evaluate_model do it after logging test metrics
     
-    return W, losses, accuracies
+    return W, losses, train_accuracies, val_accuracies, val_losses
 
 def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=False):
     """
@@ -449,13 +510,15 @@ def evaluate_model(net, X_test, T_test, y_test, W, train_accuracies, use_wandb=F
 
 
 
-def plot_training_results(losses, train_accuracies, test_accuracy=None, figsize=(15, 5), save_path=None):
+def plot_training_results(losses, train_accuracies, val_accuracies, val_losses, test_accuracy=None, figsize=(15, 5), save_path=None):
     """
     Plot training curves including loss and accuracy over epochs.
     
     Args:
-        losses: List of loss values per epoch
+        losses: List of training loss values per epoch
         train_accuracies: List of training accuracy values per epoch
+        val_accuracies: List of validation accuracy values per epoch (required)
+        val_losses: List of validation loss values per epoch (required)
         test_accuracy: Final test accuracy (optional, shown as horizontal line)
         figsize: Figure size (width, height)
         save_path: Optional path to save the figure (e.g., 'training_curves.png')
@@ -470,30 +533,44 @@ def plot_training_results(losses, train_accuracies, test_accuracy=None, figsize=
     # Create figure with 3 subplots
     fig, axes = plt.subplots(1, 3, figsize=figsize)
     
-    # Plot 1: Training Loss
+    # Plot 1: Training and Validation Loss
     axes[0].plot(epochs, losses, 'b-', linewidth=2, label='Training Loss')
+    axes[0].plot(epochs, val_losses, 'orange', linestyle='--', linewidth=2, label='Validation Loss')
     axes[0].set_xlabel('Epoch', fontsize=11)
     axes[0].set_ylabel('Loss', fontsize=11)
-    axes[0].set_title('Training Loss Over Time', fontsize=12, fontweight='bold')
+    axes[0].set_title('Loss Over Time', fontsize=12, fontweight='bold')
     axes[0].grid(True, alpha=0.3)
     axes[0].legend()
     
-    # Plot 2: Training Accuracy
+    # Plot 2: Training and Validation Accuracy
     axes[1].plot(epochs, train_accuracies, 'g-', linewidth=2, label='Training Accuracy')
+    axes[1].plot(epochs, val_accuracies, 'orange', linestyle='--', linewidth=2, label='Validation Accuracy')
     if test_accuracy is not None:
         axes[1].axhline(y=test_accuracy * 100, color='r', linestyle='--', linewidth=2, 
                        label=f'Test Accuracy: {test_accuracy * 100:.2f}%')
     axes[1].set_xlabel('Epoch', fontsize=11)
     axes[1].set_ylabel('Accuracy (%)', fontsize=11)
-    axes[1].set_title('Training Accuracy Over Time', fontsize=12, fontweight='bold')
+    axes[1].set_title('Accuracy Over Time', fontsize=12, fontweight='bold')
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
     
-    # Plot 3: Accuracy Improvement (delta between consecutive epochs)
-    accuracy_deltas = [0] + [train_accuracies[i] - train_accuracies[i-1] 
-                              for i in range(1, len(train_accuracies))]
-    colors = ['g' if d >= 0 else 'r' for d in accuracy_deltas]
-    axes[2].bar(epochs, accuracy_deltas, color=colors, alpha=0.6)
+    # Plot 3: Accuracy Improvement (delta between consecutive epochs for train and val)
+    train_deltas = [0] + [train_accuracies[i] - train_accuracies[i-1] 
+                          for i in range(1, len(train_accuracies))]
+    val_deltas = [0] + [val_accuracies[i] - val_accuracies[i-1] 
+                       for i in range(1, len(val_accuracies))]
+    
+    # Bar width for side-by-side bars
+    width = 0.5
+    x = np.array(list(epochs))
+    
+    # Create bars
+    train_colors = ['g' if d >= 0 else 'r' for d in train_deltas]
+    val_colors = ['orange' if d >= 0 else 'darkred' for d in val_deltas]
+    
+    axes[2].bar(x - width/2, train_deltas, width, color=train_colors, alpha=0.6, label='Train')
+    axes[2].bar(x + width/2, val_deltas, width, color=val_colors, alpha=0.6, label='Val')
+    axes[2].legend()
     axes[2].axhline(y=0, color='black', linestyle='-', linewidth=0.8)
     axes[2].set_xlabel('Epoch', fontsize=11)
     axes[2].set_ylabel('Accuracy Change (%)', fontsize=11)
@@ -509,3 +586,75 @@ def plot_training_results(losses, train_accuracies, test_accuracy=None, figsize=
     plt.show()
     
     return fig
+
+
+
+def plot_confusion_matrix(y_true, y_pred, class_names=None, normalize=False, figsize=(8, 6), save_path=None):
+    """
+    Plot confusion matrix for model predictions.
+    
+    Args:
+        y_true: True labels (1D array of class indices)
+        y_pred: Predicted labels (1D array of class indices)
+        class_names: List of class names (optional, uses indices if None)
+        normalize: Whether to normalize by row (True) or show raw counts (False)
+        figsize: Figure size (width, height)
+        save_path: Optional path to save the figure (e.g., 'confusion_matrix.png')
+    
+    Returns:
+        fig: Matplotlib figure object
+        cm: Confusion matrix array
+    """
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import confusion_matrix
+    
+    # Calculate confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Normalize if requested
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        fmt = '.2f'
+        title = 'Normalized Confusion Matrix'
+    else:
+        fmt = 'd'
+        title = 'Confusion Matrix'
+    
+    # Set up class names
+    if class_names is None:
+        class_names = [str(i) for i in range(len(cm))]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+    
+    # Set ticks and labels
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           xticklabels=class_names,
+           yticklabels=class_names,
+           title=title,
+           ylabel='True Label',
+           xlabel='Predicted Label')
+    
+    # Rotate x labels for readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    
+    # Add text annotations
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], fmt),
+                   ha="center", va="center",
+                   color="white" if cm[i, j] > thresh else "black")
+    
+    fig.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Confusion matrix saved to: {save_path}")
+    
+    plt.show()
+    
+    return fig, cm

@@ -212,68 +212,42 @@ class JAXNetBase:
 
 
     def _apply_optimizer_update(self, W, layer_idx, gradients, eta, batch_size):
-        """
-        Apply optimizer-specific weight updates with optional update clipping.
-        
-        Args:
-            W: Current weights (list of arrays)
-            layer_idx: Index of layer to update
-            gradients: Computed gradients
-            eta: Learning rate
-            batch_size: Size of current batch
-        
-        Returns:
-            W: Updated weights
-        """
+        """Apply optimizer-specific weight updates with optional update clipping."""
         # Create a copy of weights list for functional update
         W = [w for w in W]  # Shallow copy for JAX functional programming
         
-        # Normalize gradients by batch size
-        grad = gradients / batch_size
-        
+                
         if self.optimizer == 'sgd':
             # Standard SGD update
-            W[layer_idx] = W[layer_idx] - eta * grad
+            W[layer_idx] = W[layer_idx] - (eta / batch_size) * gradients
             
         elif self.optimizer == 'adam':
             # Adam optimizer with bias correction and update clipping
             beta1, beta2, epsilon = 0.9, 0.999, 1e-8
-            
             # Update biased first moment estimate
-            self.m[layer_idx] = beta1 * self.m[layer_idx] + (1 - beta1) * grad
-            
+            self.m[layer_idx] = beta1 * self.m[layer_idx] + (1 - beta1) * gradients
             # Update biased second raw moment estimate
-            self.v[layer_idx] = beta2 * self.v[layer_idx] + (1 - beta2) * (grad ** 2)
-            
+            self.v[layer_idx] = beta2 * self.v[layer_idx] + (1 - beta2) * (gradients ** 2)
             # Compute bias-corrected first moment estimate
             m_hat = self.m[layer_idx] / (1 - beta1 ** self.t)
-            
             # Compute bias-corrected second raw moment estimate
             v_hat = self.v[layer_idx] / (1 - beta2 ** self.t)
-            
             # Compute the raw update
-            update = eta * m_hat / (jnp.sqrt(v_hat) + epsilon)
-            
-            # Apply update clipping for Adam (clip the update, not the gradient)
-            update_norm = jnp.linalg.norm(update)
-            max_update_norm = 1.0  # Maximum allowed update norm for Adam
-            update = jnp.where(update_norm > max_update_norm, 
-                             update * (max_update_norm / update_norm), 
-                             update)
-            
-            # Apply the clipped update
+            denominator = jnp.sqrt(v_hat) + epsilon
+            update = (eta / batch_size) * m_hat / denominator
+            update = update * (batch_size / 32)
+            # Clip extreme updates to prevent instability
+            update = jnp.clip(update, -1.0, 1.0)  # Element-wise clipping
             W[layer_idx] = W[layer_idx] - update
             
         elif self.optimizer == 'rmsprop':
             # RMSprop optimizer
-            decay_rate, epsilon = 0.9, 1e-8
-            
+            decay_rate, epsilon = 0.99, 1e-8
             # Update moving average of squared gradients
-            self.v[layer_idx] = decay_rate * self.v[layer_idx] + (1 - decay_rate) * (grad ** 2)
-            
+            self.v[layer_idx] = decay_rate * self.v[layer_idx] + (1 - decay_rate) * (gradients ** 2)
             # Apply update
-            W[layer_idx] = W[layer_idx] - eta * grad / (jnp.sqrt(self.v[layer_idx]) + epsilon)
-            
+            W[layer_idx] = W[layer_idx] - (eta / batch_size) * gradients / (jnp.sqrt(self.v[layer_idx]) + epsilon)
+
         else:
             raise ValueError(f"Unknown optimizer: {self.optimizer}")
         
@@ -290,11 +264,11 @@ class JAXNetBase:
     def _activation_function(self, z):
         """Apply activation function"""
         if self.activation == 'relu':
-            return jnp.maximum(0, z)
+            return jnp.maximum(0, z).astype(jnp.float32)
         elif self.activation == 'tanh':
-            return jnp.tanh(z)
+            return jnp.tanh(z).astype(jnp.float32)
         elif self.activation == 'sigmoid':
-            return 1 / (1 + jnp.exp(-jnp.clip(z, -500, 500)))  # Clip to prevent overflow
+            return (1 / (1 + jnp.exp(-jnp.clip(z, -500, 500)))).astype(jnp.float32)
         else:
             raise ValueError(f"Unknown activation: {self.activation}")
         
@@ -304,9 +278,9 @@ class JAXNetBase:
         if self.activation == 'relu':
             return (a > 0).astype(jnp.float32)
         elif self.activation == 'tanh':
-            return 1 - a**2
+            return (1 - a**2).astype(jnp.float32)
         elif self.activation == 'sigmoid':
-            return a * (1 - a)
+            return (a * (1 - a)).astype(jnp.float32)
         else:
             raise ValueError(f"Unknown activation: {self.activation}")
         
@@ -475,7 +449,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, X_val=None, T_val=None, use_c
         print(f"{epoch_str:<10} {accuracy_str:<12} {val_acc_str:<12} {gain_str:<10} {time_str:<10} {eta_str}")
         
         # Log to W&B if enabled
-        if use_wandb and wandb_project:
+        if use_wandb and (wandb_project or wandb.run is not None):
             # Prepare log dictionary
             log_dict = {
                 "epoch": epoch + 1,

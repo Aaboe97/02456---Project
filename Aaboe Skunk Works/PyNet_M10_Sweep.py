@@ -17,6 +17,7 @@ from keras.datasets import mnist
 from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from PyNet import PyNetBase, train, evaluate_model, plot_training_results, plot_confusion_matrix
+np.random.seed(42)
 
 
 def train_sweep():

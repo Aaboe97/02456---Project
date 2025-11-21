@@ -18,6 +18,7 @@ import wandb
 from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from PyNet import PyNetBase, train, evaluate_model
+np.random.seed(42)
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)  # Suppress runtime warnings for mental stability
 

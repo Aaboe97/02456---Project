@@ -12,6 +12,7 @@ This script will be called automatically by WandB for each sweep run.
 """
 
 import jax.numpy as jnp
+import numpy as np
 import wandb
 from keras.datasets import mnist
 from keras.utils import to_categorical
@@ -24,6 +25,9 @@ def train_sweep():
     Main training function called by WandB sweep agent.
     Gets hyperparameters from wandb.config and runs one training experiment.
     """
+    
+    # Set seed for reproducibility (controls numpy operations like train_test_split)
+    np.random.seed(42)
     
     # Initialize WandB run (sweep agent handles this automatically)
     run = wandb.init()

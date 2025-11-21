@@ -1,3 +1,5 @@
+project: PyNet_M10_Sweep1_Final
+entity: DeepLearning_Group101
 program: PyNet_M10_Sweep.py
 method: grid
 metric:

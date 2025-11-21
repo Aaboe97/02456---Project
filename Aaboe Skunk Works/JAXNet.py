@@ -364,7 +364,7 @@ def train(net, X, T, W, epochs, eta, batchsize=32, X_val=None, T_val=None, use_c
 
     m = X.shape[1]  # Training set size
     m_val = X_val.shape[1]  # Validation set size
-    key = random.PRNGKey(42)  # For batch shuffling and dropout
+    key = random.PRNGKey(net.seed)  # For batch shuffling and dropout - uses network's seed
     
     for epoch in range(epochs):
         epoch_start = time.time()  # Start timing this epoch
